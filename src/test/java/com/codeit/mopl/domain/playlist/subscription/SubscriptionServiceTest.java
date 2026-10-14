@@ -7,6 +7,7 @@ import com.codeit.mopl.domain.playlist.entity.Playlist;
 import com.codeit.mopl.domain.playlist.repository.PlaylistRepository;
 import com.codeit.mopl.domain.playlist.subscription.entity.Subscription;
 import com.codeit.mopl.domain.playlist.subscription.repository.SubscriptionRepository;
+import com.codeit.mopl.domain.playlist.service.PlaylistDetailCache;
 import com.codeit.mopl.domain.playlist.subscription.service.SubscriptionService;
 import com.codeit.mopl.domain.user.entity.User;
 import com.codeit.mopl.domain.user.repository.UserRepository;
@@ -40,6 +41,7 @@ public class SubscriptionServiceTest {
     @Mock private PlaylistRepository playlistRepository;
     @Mock private UserRepository userRepository;
     @Mock private NotificationService notificationService;
+    @Mock private PlaylistDetailCache playlistDetailCache;
     @InjectMocks private SubscriptionService subscriptionService;
 
     @Nested
@@ -87,6 +89,7 @@ public class SubscriptionServiceTest {
             verify(userRepository).findById(subscriberId);
             verify(subscriptionRepository).existsBySubscriberIdAndPlaylistId(subscriberId,playlistId);
             verify(subscriptionRepository).save(any(Subscription.class));
+            verify(playlistDetailCache).evictAfterCommit(playlistId);
             playlistRepository.save(playlist);
             verify(notificationService).createNotification( // 추가: 알림 생성
                     eq(ownerId),
@@ -142,6 +145,7 @@ public class SubscriptionServiceTest {
             verify(subscriptionRepository, never()).save(any());
             verify(playlistRepository, never()).save(any(Playlist.class));
             verify(notificationService, never()).createNotification(any(), any(), any(), any());
+            verify(playlistDetailCache, never()).evictAfterCommit(any());
         }
     }
 
@@ -179,6 +183,7 @@ public class SubscriptionServiceTest {
             verify(subscriptionRepository).delete(subscription);
             verify(playlistRepository).save(playlist);
             verify(subscriptionRepository, never()).save(any(Subscription.class));
+            verify(playlistDetailCache).evictAfterCommit(playlistId);
         }
 
         @Test

@@ -7,6 +7,7 @@ import com.codeit.mopl.domain.notification.template.NotificationTemplate;
 import com.codeit.mopl.domain.notification.template.context.PlaylistSubscribedContext;
 import com.codeit.mopl.domain.playlist.entity.Playlist;
 import com.codeit.mopl.domain.playlist.repository.PlaylistRepository;
+import com.codeit.mopl.domain.playlist.service.PlaylistDetailCache;
 import com.codeit.mopl.domain.playlist.subscription.entity.Subscription;
 import com.codeit.mopl.domain.playlist.subscription.repository.SubscriptionRepository;
 import com.codeit.mopl.domain.user.entity.User;
@@ -36,6 +37,7 @@ public class SubscriptionService {
     private final PlaylistRepository playlistRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final PlaylistDetailCache playlistDetailCache;
 
     public void subscribe(UUID playlistId, UUID subscriberId) {
         Instant subscribedAt = Instant.now();
@@ -71,6 +73,8 @@ public class SubscriptionService {
         // 구독자 증가
         playlist.incrementSubscriberCount();
         playlistRepository.save(playlist);
+        // 캐시된 상세 정보의 구독자 수가 바뀌므로 커밋 후 무효화
+        playlistDetailCache.evictAfterCommit(playlistId);
 
         log.info("[플레이리스트] 플레이리스트 구독 처리 완료 - playlistId = {}, subscriberId = {}", playlistId, subscriberId);
 
@@ -103,6 +107,7 @@ public class SubscriptionService {
         //구독자 감소
         playlist.decrementSubscriberCount();
         playlistRepository.save(playlist);
+        playlistDetailCache.evictAfterCommit(playlistId);
 
         log.info("[플레이리스트] 플레이리스트 구독 취소 처리 완료 - playlistId = {}, subscriberId = {}", playlistId, subscriberId);
 

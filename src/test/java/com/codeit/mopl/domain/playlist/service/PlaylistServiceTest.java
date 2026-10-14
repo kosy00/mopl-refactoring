@@ -53,6 +53,7 @@ public class PlaylistServiceTest {
     @Mock private PlaylistMapper playlistMapper;
     @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private PlaylistDetailCache playlistDetailCache;
     @InjectMocks private PlaylistService playlistService;
 
     @Nested
@@ -253,9 +254,8 @@ public class PlaylistServiceTest {
             PlaylistCachedDto cachedDto = new PlaylistCachedDto(
                     playlistId, userSummary, "테스트 제목", "테스트 설명", null, 2, null);
 
-            given(playlistRepository.findById(playlistId)).willReturn(Optional.ofNullable(playlist));
+            given(playlistDetailCache.get(playlistId)).willReturn(cachedDto);
             given(subscriptionRepository.existsBySubscriberIdAndPlaylistId(loginUserId, playlistId)).willReturn(false);
-            given(playlistMapper.toCachedDto(playlist)).willReturn(cachedDto);
             given(playlistMapper.toPlaylistDto(cachedDto, false)).willReturn(dto);
 
             //when
@@ -273,7 +273,8 @@ public class PlaylistServiceTest {
             UUID loginUserId = UUID.randomUUID();
             UUID nonExistentPlaylistId = UUID.randomUUID();
 
-            given(playlistRepository.findById(nonExistentPlaylistId)).willReturn(Optional.empty());
+            given(playlistDetailCache.get(nonExistentPlaylistId))
+                    .willThrow(PlaylistNotFoundException.withId(nonExistentPlaylistId));
             //when & then
             assertThrows(PlaylistNotFoundException.class, () ->
                     playlistService.getPlaylist(loginUserId, nonExistentPlaylistId));
@@ -297,9 +298,8 @@ public class PlaylistServiceTest {
             PlaylistCachedDto cachedDto = new PlaylistCachedDto(
                     playlistId, userSummary, "테스트 제목", "테스트 설명", null, 0, Collections.emptyList());
 
-            given(playlistRepository.findById(playlistId)).willReturn(Optional.ofNullable(playlist));
+            given(playlistDetailCache.get(playlistId)).willReturn(cachedDto);
             given(subscriptionRepository.existsBySubscriberIdAndPlaylistId(loginUserId, playlistId)).willReturn(true);
-            given(playlistMapper.toCachedDto(playlist)).willReturn(cachedDto);
             given(playlistMapper.toPlaylistDto(cachedDto, true)).willReturn(dto);
 
             //when
@@ -348,6 +348,7 @@ public class PlaylistServiceTest {
             //then
             assertThat(result.title()).isEqualTo("테스트 제목 수정");
             assertThat(result.description()).isEqualTo("테스트 설명 수정");
+            verify(playlistDetailCache).evictAfterCommit(playlistId);
         }
 
         @WithMockUser
@@ -408,6 +409,7 @@ public class PlaylistServiceTest {
             verify(playlistRepository).findById(playlistId);
             verify(subscriptionRepository).deleteByPlaylistId(playlistId);
             verify(playlistRepository).deleteById(playlistId);
+            verify(playlistDetailCache).evictAfterCommit(playlistId);
         }
 
         @Test
@@ -435,6 +437,7 @@ public class PlaylistServiceTest {
             verify(playlistRepository).findById(playlistId);
             verify(playlistMapper, never()).toPlaylistDto(any(PlaylistCachedDto.class), anyBoolean());
             verify(playlistRepository, never()).deleteById(playlistId);
+            verify(playlistDetailCache, never()).evictAfterCommit(any());
         }
     }
 
