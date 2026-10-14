@@ -1,7 +1,6 @@
 package com.codeit.mopl.domain.message.directmessage.controller;
 
 import com.codeit.mopl.domain.message.conversation.repository.ConversationRepository;
-import com.codeit.mopl.domain.message.conversation.repository.ConversationSubscriptionRegistry;
 import com.codeit.mopl.domain.message.directmessage.dto.DirectMessageDto;
 import com.codeit.mopl.domain.message.directmessage.dto.DirectMessageSendRequest;
 import com.codeit.mopl.domain.message.directmessage.service.DirectMessageService;
@@ -28,7 +27,6 @@ public class DirectMessageController {
 
     private final DirectMessageService directMessageService;
     private final SimpMessagingTemplate messagingTemplate;
-    private final ConversationSubscriptionRegistry conversationSubscriptionRegistry;
 
     @MessageMapping("/conversations/{conversationId}/direct-messages")
     public void sendDirectMessage (@DestinationVariable UUID conversationId,
@@ -46,9 +44,6 @@ public class DirectMessageController {
 
         DirectMessageDto dto =
                 directMessageService.saveDirectMessage(senderId, conversationId, request);
-
-        // 대화 중인 사용자의 활성 채팅방 TTL 연장 (키가 없으면 무시됨)
-        conversationSubscriptionRegistry.touch(senderId, conversationId);
 
         String destination = "/sub/conversations/" + conversationId + "/direct-messages";
         log.info("[WS SEND] Sending message to destination: {}, dto: {}", destination, dto);
