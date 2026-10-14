@@ -46,6 +46,9 @@ class PlaylistKafkaEventTest {
   @Mock
   private SubscriptionRepository subscriptionRepository;
 
+  @Mock
+  private PlaylistDetailCache playlistDetailCache;
+
   private PlaylistService playlistService;
 
   @BeforeEach
@@ -55,7 +58,8 @@ class PlaylistKafkaEventTest {
         userRepository,
         playlistMapper,
         eventPublisher,
-        subscriptionRepository
+        subscriptionRepository,
+        playlistDetailCache
     );
   }
 

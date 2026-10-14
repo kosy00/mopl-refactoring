@@ -9,6 +9,7 @@ import com.codeit.mopl.domain.playlist.entity.Playlist;
 import com.codeit.mopl.domain.playlist.playlistitem.entity.PlaylistItem;
 import com.codeit.mopl.domain.playlist.playlistitem.repository.PlaylistItemRepository;
 import com.codeit.mopl.domain.playlist.playlistitem.service.PlaylistItemService;
+import com.codeit.mopl.domain.playlist.service.PlaylistDetailCache;
 import com.codeit.mopl.domain.playlist.repository.PlaylistRepository;
 import com.codeit.mopl.domain.playlist.subscription.entity.Subscription;
 import com.codeit.mopl.domain.playlist.subscription.repository.SubscriptionRepository;
@@ -41,6 +42,7 @@ public class PlaylistItemServiceTest {
     @Mock private ContentRepository contentRepository;
     @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private NotificationService notificationService;
+    @Mock private PlaylistDetailCache playlistDetailCache;
     @InjectMocks
     private PlaylistItemService playlistItemService;
 
@@ -89,6 +91,7 @@ public class PlaylistItemServiceTest {
             verify(playlistRepository).findById(playlistId);
             verify(contentRepository).findById(contentId);
             verify(subscriptionRepository).findByPlaylistId(playlistId);
+            verify(playlistDetailCache).evictAfterCommit(playlistId);
             verify(notificationService).createNotification(
                     eq(subscriberId),
                     eq("구독한 플레이리스트에 새로운 콘텐츠 추가"),
@@ -148,6 +151,7 @@ public class PlaylistItemServiceTest {
             // then
             verify(playlistRepository).findById(playlistId);
             verify(playlistItemRepository).findByPlaylistIdAndContentId(playlistId,contentId);
+            verify(playlistDetailCache).evictAfterCommit(playlistId);
         }
 
         @Test
@@ -174,6 +178,7 @@ public class PlaylistItemServiceTest {
                     () -> playlistItemService.deleteContent(playlistId, contentId, realOwnerId));
             verify(playlistRepository).findById(playlistId);
             verify(playlistItemRepository,never()).delete(any());
+            verify(playlistDetailCache, never()).evictAfterCommit(any());
         }
     }
 
