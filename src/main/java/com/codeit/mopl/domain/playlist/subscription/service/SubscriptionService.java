@@ -20,6 +20,7 @@ import com.codeit.mopl.exception.user.UserErrorCode;
 import com.codeit.mopl.exception.user.UserNotFoundException;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,11 +69,17 @@ public class SubscriptionService {
         }
 
         Subscription subscription = new Subscription(playlist, subscriber, subscribedAt);
-        subscriptionRepository.save(subscription);
+        try {
+            // 즉시 INSERT해서 UNIQUE 제약 위반을 이 시점에 감지한다.
+            // (위의 존재 확인과 저장 사이에 동시 요청이 끼어들 수 있으므로 DB 제약을 최종 방어선으로 사용)
+            subscriptionRepository.saveAndFlush(subscription);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("[플레이리스트] 플레이리스트 구독 처리 실패 - 동시 요청으로 인한 중복 구독 - playlistId = {}, subscriberId = {}", playlistId, subscriberId);
+            throw SubscriptionDuplicateException.withId(playlistId, subscriberId);
+        }
 
-        // 구독자 증가
-        playlist.incrementSubscriberCount();
-        playlistRepository.save(playlist);
+        // 구독자 증가 (DB 원자적 UPDATE로 갱신 손실 방지)
+        playlistRepository.incrementSubscriberCount(playlistId);
         // 캐시된 상세 정보의 구독자 수가 바뀌므로 커밋 후 무효화
         playlistDetailCache.evictAfterCommit(playlistId);
 
@@ -96,17 +103,15 @@ public class SubscriptionService {
     public void unsubscribe(UUID playlistId, UUID subscriberId) {
         log.info("[플레이리스트] 플레이리스트 구독 취소 처리 시작 - playlistId = {}, subscriberId = {}", playlistId, subscriberId);
 
-        Subscription subscription = subscriptionRepository.findBySubscriberIdAndPlaylistId(subscriberId,playlistId)
-                        .orElseThrow(()-> {
-                            log.warn("[플레이리스트] 플레이리스트 구독 취소 처리 실패 - 구독 내역이 존재하지 않음 - playlistId = {}", playlistId);
-                            return SubscriptionNotFoundException.withId(subscriberId, playlistId);
-                        });
-        Playlist playlist = subscription.getPlaylist();
-        subscriptionRepository.delete(subscription);
+        // 조회 후 삭제하면 동시 요청이 같은 구독을 함께 삭제하려다 충돌하므로, DELETE 결과(삭제된 행 수)로 판단한다.
+        int deleted = subscriptionRepository.deleteBySubscriberAndPlaylist(subscriberId, playlistId);
+        if (deleted == 0) {
+            log.warn("[플레이리스트] 플레이리스트 구독 취소 처리 실패 - 구독 내역이 존재하지 않음 - playlistId = {}", playlistId);
+            throw SubscriptionNotFoundException.withId(subscriberId, playlistId);
+        }
 
-        //구독자 감소
-        playlist.decrementSubscriberCount();
-        playlistRepository.save(playlist);
+        // 구독자 감소 (실제로 삭제된 경우에만, DB 원자적 UPDATE)
+        playlistRepository.decrementSubscriberCount(playlistId);
         playlistDetailCache.evictAfterCommit(playlistId);
 
         log.info("[플레이리스트] 플레이리스트 구독 취소 처리 완료 - playlistId = {}, subscriberId = {}", playlistId, subscriberId);

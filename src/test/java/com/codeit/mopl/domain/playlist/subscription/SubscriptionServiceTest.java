@@ -15,6 +15,7 @@ import com.codeit.mopl.exception.playlist.PlaylistNotFoundException;
 import com.codeit.mopl.exception.playlist.subscription.SubscriptionDuplicateException;
 import com.codeit.mopl.exception.playlist.subscription.SubscriptionNotFoundException;
 import java.time.Instant;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -79,7 +80,7 @@ public class SubscriptionServiceTest {
                     .subscriber(subscriber)
                     .subscribedAt(subscribedAt)
                     .build();
-            given(subscriptionRepository.save(any(Subscription.class)))
+            given(subscriptionRepository.saveAndFlush(any(Subscription.class)))
                     .willReturn(saved);
             // when
             subscriptionService.subscribe(playlistId, subscriberId);
@@ -88,9 +89,9 @@ public class SubscriptionServiceTest {
             verify(playlistRepository).findById(playlistId);
             verify(userRepository).findById(subscriberId);
             verify(subscriptionRepository).existsBySubscriberIdAndPlaylistId(subscriberId,playlistId);
-            verify(subscriptionRepository).save(any(Subscription.class));
+            verify(subscriptionRepository).saveAndFlush(any(Subscription.class));
+            verify(playlistRepository).incrementSubscriberCount(playlistId);
             verify(playlistDetailCache).evictAfterCommit(playlistId);
-            playlistRepository.save(playlist);
             verify(notificationService).createNotification( // 추가: 알림 생성
                     eq(ownerId),
                     eq("플레이리스트에 새로운 구독자 알림"),
@@ -146,6 +147,36 @@ public class SubscriptionServiceTest {
             verify(playlistRepository, never()).save(any(Playlist.class));
             verify(notificationService, never()).createNotification(any(), any(), any(), any());
             verify(playlistDetailCache, never()).evictAfterCommit(any());
+            verify(playlistRepository, never()).incrementSubscriberCount(any());
+        }
+
+        @Test
+        @DisplayName("존재 확인을 통과했더라도 동시 요청으로 UNIQUE 제약을 위반하면 중복 구독 예외로 변환함")
+        void shouldConvertUniqueViolationToDuplicateException() {
+            // given
+            UUID subscriberId = UUID.randomUUID();
+            User subscriber = new User();
+            setId(subscriber, subscriberId);
+
+            User owner = new User();
+            setId(owner, UUID.randomUUID());
+
+            UUID playlistId = UUID.randomUUID();
+            Playlist playlist = Playlist.builder().user(owner).build();
+
+            given(playlistRepository.findById(playlistId)).willReturn(Optional.of(playlist));
+            given(userRepository.findById(subscriberId)).willReturn(Optional.of(subscriber));
+            given(subscriptionRepository.existsBySubscriberIdAndPlaylistId(subscriberId, playlistId))
+                    .willReturn(false);
+            given(subscriptionRepository.saveAndFlush(any(Subscription.class)))
+                    .willThrow(new DataIntegrityViolationException("unique violation"));
+
+            // when & then
+            assertThrows(SubscriptionDuplicateException.class,
+                    () -> subscriptionService.subscribe(playlistId, subscriberId));
+            verify(playlistRepository, never()).incrementSubscriberCount(any());
+            verify(notificationService, never()).createNotification(any(), any(), any(), any());
+            verify(playlistDetailCache, never()).evictAfterCommit(any());
         }
     }
 
@@ -172,16 +203,15 @@ public class SubscriptionServiceTest {
                     .subscriber(subscriber)
                     .subscribedAt(subscribedAt)
                     .build();
-            given(subscriptionRepository.findBySubscriberIdAndPlaylistId(subscriberId, playlistId))
-                    .willReturn(Optional.of(subscription));
+            given(subscriptionRepository.deleteBySubscriberAndPlaylist(subscriberId, playlistId))
+                    .willReturn(1);
 
             //when
             subscriptionService.unsubscribe(playlistId, subscriberId);
 
             //then
-            verify(subscriptionRepository).findBySubscriberIdAndPlaylistId(subscriberId, playlistId);
-            verify(subscriptionRepository).delete(subscription);
-            verify(playlistRepository).save(playlist);
+            verify(subscriptionRepository).deleteBySubscriberAndPlaylist(subscriberId, playlistId);
+            verify(playlistRepository).decrementSubscriberCount(playlistId);
             verify(subscriptionRepository, never()).save(any(Subscription.class));
             verify(playlistDetailCache).evictAfterCommit(playlistId);
         }
@@ -192,15 +222,15 @@ public class SubscriptionServiceTest {
             //given
             UUID playlistId = UUID.randomUUID();
             UUID subscriberId = UUID.randomUUID();
-            given(subscriptionRepository.findBySubscriberIdAndPlaylistId(subscriberId, playlistId))
-                    .willReturn(Optional.empty());
+            given(subscriptionRepository.deleteBySubscriberAndPlaylist(subscriberId, playlistId))
+                    .willReturn(0);
 
             //when & then
             assertThrows(SubscriptionNotFoundException.class,
                     () -> subscriptionService.unsubscribe(playlistId, subscriberId));
-            verify(subscriptionRepository).findBySubscriberIdAndPlaylistId(subscriberId, playlistId);
-            verify(subscriptionRepository, never()).delete(any());
-            verify(subscriptionRepository, never()).save(any());
+            verify(subscriptionRepository).deleteBySubscriberAndPlaylist(subscriberId, playlistId);
+            verify(playlistRepository, never()).decrementSubscriberCount(any());
+            verify(playlistDetailCache, never()).evictAfterCommit(any());
         }
     }
 
