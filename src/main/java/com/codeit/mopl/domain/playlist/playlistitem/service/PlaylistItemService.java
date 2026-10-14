@@ -12,6 +12,7 @@ import com.codeit.mopl.domain.playlist.entity.Playlist;
 import com.codeit.mopl.domain.playlist.playlistitem.entity.PlaylistItem;
 import com.codeit.mopl.domain.playlist.playlistitem.repository.PlaylistItemRepository;
 import com.codeit.mopl.domain.playlist.repository.PlaylistRepository;
+import com.codeit.mopl.domain.playlist.service.PlaylistDetailCache;
 import com.codeit.mopl.domain.playlist.subscription.entity.Subscription;
 import com.codeit.mopl.domain.playlist.subscription.repository.SubscriptionRepository;
 import com.codeit.mopl.exception.content.ContentErrorCode;
@@ -40,6 +41,7 @@ public class PlaylistItemService {
     private final ContentRepository contentRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final NotificationService notificationService;
+    private final PlaylistDetailCache playlistDetailCache;
 
     public void addContent(UUID playlistId, UUID contentId, UUID ownerId) {
         log.info("[플레이리스트] 플레이리스트에 콘텐츠 추가 시작 - playlistId = {}", playlistId);
@@ -61,6 +63,8 @@ public class PlaylistItemService {
         PlaylistItem playlistItem = new PlaylistItem(playlist, content);
         log.info("[플레이리스트] 플레이리스트에 콘텐츠 추가 완료 - playlistId = {}, contentId = {}", playlistId, contentId);
         playlist.addPlaylistItem(playlistItem);
+        // 캐시된 상세 정보의 콘텐츠 목록이 바뀌므로 커밋 후 무효화
+        playlistDetailCache.evictAfterCommit(playlistId);
 
         // 구독자들에게 알림 생성함 (동기 처리)
         List<Subscription> subscriptions = subscriptionRepository.findByPlaylistId(playlistId);
@@ -106,6 +110,7 @@ public class PlaylistItemService {
                     return PlaylistItemNotFoundException.withId(contentId);
                 });
         playlist.removePlaylistItem(playlistItem);
+        playlistDetailCache.evictAfterCommit(playlistId);
         log.info("[플레이리스트] 플레이리스트에서 콘텐츠 삭제 완료 - playlistId = {}, contentId = {}", playlistId, contentId);
     }
 }
