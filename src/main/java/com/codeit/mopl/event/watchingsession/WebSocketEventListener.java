@@ -51,7 +51,7 @@ public class WebSocketEventListener {
       UUID userId = getUserId(accessor, sessionId);
       UUID conversationId = parseConversationId(destination);
 
-      conversationSubscriptionRegistry.join(userId, conversationId);
+      conversationSubscriptionRegistry.join(userId, conversationId, connectionId(sessionId, subscriptionId));
 
       @SuppressWarnings("unchecked")
       Map<String, UUID> dmSubscriptions = (Map<String, UUID>) accessor.getSessionAttributes()
@@ -103,7 +103,7 @@ public class WebSocketEventListener {
       UUID conversationId = dmSubscriptions.remove(subscriptionId);
       if (conversationId != null) {
         UUID userId = getUserId(accessor, sessionId);
-        conversationSubscriptionRegistry.leave(userId, conversationId);
+        conversationSubscriptionRegistry.leave(userId, conversationId, connectionId(sessionId, subscriptionId));
         log.info("[WebsocketEventListener] DM 구독 해제 - userId: {}, conversationId: {}", userId, conversationId);
         return;
       }
@@ -146,10 +146,16 @@ public class WebSocketEventListener {
     Map<String, UUID> dmSubscriptions = attrs != null
         ? (Map<String, UUID>) attrs.get("dmSubscriptions") : null;
     if (dmSubscriptions != null && !dmSubscriptions.isEmpty()) {
-      UUID userId = getUserId(accessor, sessionId);
-      for (UUID conversationId : dmSubscriptions.values()) {
-        conversationSubscriptionRegistry.leave(userId, conversationId);
-        log.info("[WebsocketEventListener] Disconnect - DM 구독 해제: userId={}, conversationId={}", userId, conversationId);
+      // DM 정리에 실패해도 아래 시청 세션 정리는 반드시 실행되도록 격리 (남은 키는 TTL로 만료)
+      try {
+        UUID userId = getUserId(accessor, sessionId);
+        for (Map.Entry<String, UUID> entry : dmSubscriptions.entrySet()) {
+          UUID conversationId = entry.getValue();
+          conversationSubscriptionRegistry.leave(userId, conversationId, connectionId(sessionId, entry.getKey()));
+          log.info("[WebsocketEventListener] Disconnect - DM 구독 해제: userId={}, conversationId={}", userId, conversationId);
+        }
+      } catch (Exception e) {
+        log.warn("[WebsocketEventListener] Disconnect - DM 구독 정리 실패, sessionId={}", sessionId, e);
       }
     }
 
@@ -203,6 +209,10 @@ public class WebSocketEventListener {
 
     log.info("[WebsocketEventListener] getUser 완료 - userId: {}", userId);
     return userId;
+  }
+
+  private String connectionId(String sessionId, String subscriptionId) {
+    return sessionId + ":" + subscriptionId;
   }
 
   private UUID parseConversationId(String destination) {

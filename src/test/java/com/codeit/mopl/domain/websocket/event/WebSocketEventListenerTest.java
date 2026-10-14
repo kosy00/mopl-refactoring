@@ -2,6 +2,7 @@ package com.codeit.mopl.domain.websocket.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -206,7 +207,7 @@ public class WebSocketEventListenerTest {
     eventListener.handleSessionSubscribe(event);
 
     // then
-    verify(conversationSubscriptionRegistry).join(userId, conversationId);
+    verify(conversationSubscriptionRegistry).join(userId, conversationId, sessionId + ":sub-1");
     verify(service, never()).joinSession(any(), any());
     @SuppressWarnings("unchecked")
     Map<String, UUID> dmSubscriptions = (Map<String, UUID>) accessor.getSessionAttributes().get("dmSubscriptions");
@@ -235,7 +236,7 @@ public class WebSocketEventListenerTest {
     eventListener.handleSessionUnSubscribe(event);
 
     // then
-    verify(conversationSubscriptionRegistry).leave(userId, conversationId);
+    verify(conversationSubscriptionRegistry).leave(userId, conversationId, sessionId + ":sub-1");
     verify(service, never()).leaveSession(any(), any(), any());
   }
 
@@ -264,9 +265,42 @@ public class WebSocketEventListenerTest {
     eventListener.handleSessionDisconnect(event);
 
     // then
-    verify(conversationSubscriptionRegistry).leave(userId, conversationId1);
-    verify(conversationSubscriptionRegistry).leave(userId, conversationId2);
+    verify(conversationSubscriptionRegistry).leave(userId, conversationId1, sessionId + ":sub-1");
+    verify(conversationSubscriptionRegistry).leave(userId, conversationId2, sessionId + ":sub-2");
     verify(service, never()).leaveSession(any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("Disconnect 시 DM 구독 정리가 실패해도 시청 세션 정리는 실행된다")
+  public void handleSessionDisconnect_dmCleanupFails_watchingSessionStillCleaned() {
+    // given
+    UUID conversationId = UUID.randomUUID();
+    Map<String, UUID> dmSubscriptions = new HashMap<>();
+    dmSubscriptions.put("sub-1", conversationId);
+
+    StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.DISCONNECT);
+    accessor.setSessionId(String.valueOf(sessionId));
+    accessor.setUser(mockAuthentication(userId));
+    Map<String, Object> sessionAttributes = new HashMap<>();
+    sessionAttributes.put("dmSubscriptions", dmSubscriptions);
+    sessionAttributes.put("watchingSessionId", watchingSessionId);
+    sessionAttributes.put("watchingContentId", contentId);
+    accessor.setSessionAttributes(sessionAttributes);
+    Message<byte[]> message = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+    SessionDisconnectEvent event = new SessionDisconnectEvent(
+        this, message, String.valueOf(sessionId), CloseStatus.NORMAL
+    );
+
+    doThrow(new RuntimeException("redis down"))
+        .when(conversationSubscriptionRegistry).leave(any(), any(), any());
+    WatchingSessionChange mockWatchingSessionChange = mock(WatchingSessionChange.class);
+    when(service.leaveSession(userId, watchingSessionId, contentId)).thenReturn(mockWatchingSessionChange);
+
+    // when
+    eventListener.handleSessionDisconnect(event);
+
+    // then
+    verify(service).leaveSession(userId, watchingSessionId, contentId);
   }
 
   // ========================= 헬퍼 메서드 =========================
